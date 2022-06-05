@@ -1,108 +1,160 @@
--- Создание представлений в схеме analysis
-CREATE OR replace VIEW analysis.products
-AS
-  SELECT *
-  FROM   production.products;
+--shipping_country_rates
+DROP TABLE IF EXISTS public.shipping_country_rates CASCADE;
 
-CREATE OR replace VIEW analysis.orderstatuses
-AS
-  SELECT *
-  FROM   production.orderstatuses;
+CREATE TABLE public.shipping_country_rates(
+   id serial ,
+   shipping_country text,
+   shipping_country_base_rate numeric(14,3),
+   PRIMARY KEY  (id)
+);
 
-CREATE OR replace VIEW analysis.users
-AS
-  SELECT *
-  FROM   production.users;
+CREATE INDEX shipping_country_rates_id ON public.shipping_country_rates(shipping_country);
 
-CREATE OR replace VIEW analysis.orders
-AS
-  SELECT *
-  FROM   production.orders;
+INSERT INTO public.shipping_country_rates (shipping_country, shipping_country_base_rate)
+SELECT DISTINCT shipping_country, shipping_country_base_rate from public.shipping;
 
-CREATE OR replace VIEW analysis.orderitems
-AS
-  SELECT *
-  FROM   production.orderitems; 
+--shipping_agreement
 
--- DDL-запрос для создания витрины
+DROP TABLE IF EXISTS public.shipping_agreement CASCADE;
 
-DROP TABLE IF EXISTS analysis.dm_rfm_segments; 
-CREATE TABLE analysis.dm_rfm_segments ( 
-        user_id INT PRIMARY KEY, 
-        recency INT CHECK (recency BETWEEN 1 AND 5 ), 
-        frequency INT CHECK (frequency BETWEEN 1 AND 5 ), 
-        monetary_value INT CHECK (monetary_value BETWEEN 1 AND 5 ) );
+CREATE TABLE public.shipping_agreement(
+agreementid bigint, 
+agreement_number text,
+agreement_rate  numeric(14,3) ,
+agreement_commission numeric(14,3),
+PRIMARY KEY (agreementid)
+);
 
--- SQL-запрос для заполнения витрины
--- INSERT INTO analysis.dm_rfm_segments
--- (user_id, recency, frequency, monetary_value)
--- WITH t AS (
--- SELECT DISTINCT u.id AS user_id,
--- CAST((MAX(order_ts) OVER ()) AS DATE) - CAST((MAX(CASE WHEN os.key = 'Closed' THEN order_ts ELSE NULL END) OVER(PARTITION BY u.id)) AS DATE) days_FROM_last_order,
--- COUNT(CASE WHEN os.key = 'Closed' THEN order_ts ELSE NULL END) OVER (PARTITION BY u.id) orders_cnt,
--- COALESCE(SUM(CASE WHEN os.key = 'Closed' THEN payment ELSE NULL END) OVER (PARTITION BY u.id),0) AS payment_BY_user
--- FROM analysis.Users u
--- LEFT JOIN analysis.Orders o
--- ON u.id = o.user_id
--- LEFT JOIN analysis.OrderStatuses os
--- ON o.status=os.id
--- WHERE EXTRACT(YEAR FROM order_ts) >= 2021 
--- ) 
--- SELECT 
---  DISTINCT user_id,
---  CASE 
---  WHEN row_number() OVER (order BY days_FROM_last_order desc) between 1 and 200 THEN 1 
---  WHEN row_number() OVER (order BY days_FROM_last_order desc) between 201 and 400 THEN 2
---  WHEN row_number() OVER (order BY days_FROM_last_order desc) between 401 and 600 THEN 3
---  WHEN row_number() OVER (order BY days_FROM_last_order desc) between 601 and 800 THEN 4
---  ELSE 5
---  END AS recency,
---  CASE 
---  WHEN row_number() OVER (order BY orders_cnt) between 1 and 200 THEN 1 
---  WHEN row_number() OVER (order BY orders_cnt) between 201 and 400 THEN 2
---  WHEN row_number() OVER (order BY orders_cnt) between 401 and 600 THEN 3
---  WHEN row_number() OVER (order BY orders_cnt) between 601 and 800 THEN 4
---  ELSE 5 END AS frequency
--- , CASE 
---  WHEN row_number() OVER (order BY payment_BY_user) between 1 and 200 THEN 1 
---  WHEN row_number() OVER (order BY payment_BY_user) between 201 and 400 THEN 2
---  WHEN row_number() OVER (order BY payment_BY_user) between 401 and 600 THEN 3
---  WHEN row_number() OVER (order BY payment_BY_user) between 601 and 800 THEN 4
---  ELSE 5 END AS monetary_value
--- FROM t;
+CREATE INDEX shipping_agremeent_id on public.shipping_agreement(agreementid);
 
--- SQL-запрос для заполнения витрины
-
-WITH t AS (
+INSERT INTO public.shipping_agreement (agreementid, agreement_number, agreement_rate, agreement_commission)
 SELECT 
-distinct u.id as user_id, 
-CAST((MAX(order_ts) OVER ()) AS DATE) - CAST((MAX(order_ts) OVER(PARTITION BY u.id)) AS DATE) days_from_last_order,
-COUNT(order_ts) OVER (PARTITION BY u.id) orders_cnt,
-SUM(payment) OVER (PARTITION BY u.id) AS payment_by_user
-FROM analysis.Users u
-LEFT JOIN (SELECT * FROM analysis.orders 
-WHERE EXTRACT(YEAR FROM order_ts) >= 2021 AND status = 4) o
-ON u.id = o.user_id)
+DISTINCT vendor_agreement_description[1]::bigint as agreementid,
+vendor_agreement_description[2]::text as agreement_number,
+vendor_agreement_description[3]::numeric(14,3) as agreement_rate,
+vendor_agreement_description[4]::numeric(14,3) as agreement_commission
+FROM
+(SELECT REGEXP_SPLIT_TO_ARRAY(vendor_agreement_description, e'\\:+') as vendor_agreement_description FROM public.shipping s) t
 
-SELECT DISTINCT user_id, 
-NTILE(5) OVER (ORDER BY days_from_last_order DESC NULLS FIRST) AS recency,
-NTILE(5) OVER (ORDER BY orders_cnt NULLS FIRST) AS frequency,
-NTILE(5) OVER (ORDER BY payment_by_user NULLS FIRST) AS monetary_value
-FROM t
+--shipping_transfer
+DROP TABLE IF EXISTS public.shipping_transfer CASCADE;
+CREATE TABLE public.shipping_transfer(
+id serial,
+transfer_type text,
+transfer_model text,
+shipping_transfer_rate numeric (14,3),
+PRIMARY KEY (id)
+);
 
--- Доработка представления
-CREATE OR REPLACE VIEW analysis.Orders AS 
-SELECT o.*, osl.status AS status FROM production.Orders o
-LEFT JOIN 
-        (SELECT 
-        osl.order_id, 
-        osl.status_id AS status 
-        FROM production.OrderStatusLog osl
-        LEFT JOIN 
-             (SELECT 
-              DISTINCT order_id, 
-              MAX(dttm) OVER (PARTITION BY order_id) last_dt
-              FROM production.OrderStatusLog) t2 
-        ON osl.order_id=t2.order_id
-        WHERE t2.last_dt=osl.dttm) osl
-ON o.order_id=osl.order_id;
+CREATE INDEX shipping_transfer_id on public.shipping_transfer(transfer_type);
+
+INSERT INTO public.shipping_transfer (transfer_type, transfer_model, shipping_transfer_rate)
+SELECT 
+DISTINCT shipping_transfer_description[1]::text as transfer_type,
+shipping_transfer_description[2]::text as transfer_model,
+shipping_transfer_rate
+FROM
+(SELECT REGEXP_SPLIT_TO_ARRAY(shipping_transfer_description,e'\\:+') as shipping_transfer_description, shipping_transfer_rate FROM public.shipping s) t;
+
+--shipping_info
+DROP TABLE IF EXISTS public.shipping_info CASCADE;
+CREATE TABLE public.shipping_info (
+shippingid bigint,
+vendorid int8,
+payment_amount numeric (14,3),
+shipping_plan_datetime timestamp, 
+transfer_type_id bigint,
+shipping_country_id bigint,
+agreementid bigint,
+FOREIGN KEY (transfer_type_id) REFERENCES public.shipping_transfer(id) ON UPDATE CASCADE,
+FOREIGN KEY (shipping_country_id) REFERENCES public.shipping_country_rates(id) ON UPDATE CASCADE,
+FOREIGN KEY (agreementid) REFERENCES public.shipping_agreement(agreementid) ON UPDATE CASCADE
+);
+
+INSERT INTO  public.shipping_info (shippingid, vendorid, payment_amount, shipping_plan_datetime, transfer_type_id, shipping_country_id, agreementid)
+SELECT DISTINCT s.shippingid,
+s.vendorid, 
+s.payment_amount, 
+shipping_plan_datetime, 
+st.id as transfer_type_id,
+scr.id as shipping_country_id,
+sa.agreementid
+FROM public.shipping s
+LEFT JOIN public.shipping_transfer st
+on st.transfer_type=(regexp_split_to_array(s.shipping_transfer_description , e'\\:+'))[1]
+LEFT JOIN public.shipping_country_rates scr 
+on scr.shipping_country=s.shipping_country
+LEFT JOIN public.shipping_agreement sa 
+on sa.agreementid = (regexp_split_to_array(s.vendor_agreement_description, e'\\:+'))[1]::bigint;
+
+
+--shipping_status
+DROP TABLE IF EXISTS public.shipping_status;
+
+CREATE TABLE public.shipping_status (
+shippingid bigint,
+status text,
+state text,
+shipping_start_fact_datetime timestamp,
+shipping_end_fact_datetime timestamp
+--foreign key (shippingid) references public.shipping_info(shippingid) on update cascade
+);
+
+WITH ship_max as (
+  SELECT shippingid,
+      max(CASE WHEN state = 'booked' THEN state_datetime ELSE NULL END) as shipping_start_fact_datetime,
+      max(CASE WHEN state = 'recieved' THEN state_datetime ELSE NULL END) as shipping_end_fact_datetime,
+      max(state_datetime) as max_state_datetime
+  FROM shipping
+  GROUP BY shippingid
+)
+INSERT INTO public.shipping_status
+(shippingid, status,state,shipping_start_fact_datetime,shipping_end_fact_datetime)
+SELECT sm.shippingid,
+s.status,
+s.state,
+sm.shipping_start_fact_datetime,
+sm.shipping_end_fact_datetime
+FROM ship_max as sm
+LEFT JOIN shipping as s on sm.shippingid = s.shippingid
+            and sm.max_state_datetime = s.state_datetime
+ORDER BY shippingid;
+
+--shipping_datamart
+DROP TABLE IF EXISTS public.shipping_datamart;
+
+CREATE TABLE public.shipping_datamart (
+shippingid bigint,
+vendorid bigint,
+transfer_type text,
+full_day_at_shipping int8,
+is_delay int8,
+is_shipping_finish int8,
+delay_day_at_shipping int8,
+payment_amount numeric(14,3),
+vat numeric(14,3), 
+profit numeric(14,3)
+);
+
+INSERT INTO public.shipping_datamart 
+(shippingid, vendorid, transfer_type, full_day_at_shipping, is_delay, is_shipping_finish, delay_day_at_shipping, payment_amount, vat, profit)
+SELECT DISTINCT si.shippingid,
+si.vendorid,
+st.transfer_type,
+DATE_PART('day', AGE(shipping_end_fact_datetime,shipping_start_fact_datetime)) as full_day_at_shipping,
+CASE WHEN shipping_end_fact_datetime > shipping_plan_datetime THEN 1 ELSE 0 END AS is_delay,
+CASE WHEN status = 'finished' THEN 1 ELSE 0 END AS is_shipping_finish,
+CASE WHEN shipping_end_fact_datetime > shipping_plan_datetime 
+THEN DATE_PART('day', AGE(shipping_end_fact_datetime,shipping_plan_datetime)) ELSE 0 END AS delay_day_at_shipping,
+si.payment_amount,
+si.payment_amount * (shipping_country_base_rate + agreement_rate + shipping_transfer_rate) as vat, 
+payment_amount * agreement_commission as profit
+FROM shipping_info as si
+LEFT JOIN shipping_transfer as st 
+on st.id=si.shipping_country_id
+LEFT JOIN shipping_status as ss 
+on ss.shippingid = si.shippingid
+LEFT JOIN shipping_country_rates scr 
+on scr.id=si.shipping_country_id 
+LEFT JOIN shipping_agreement sa
+on sa.agreementid=si.agreementid;
