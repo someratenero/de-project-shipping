@@ -83,7 +83,7 @@ scr.id as shipping_country_id,
 sa.agreementid
 FROM public.shipping s
 LEFT JOIN public.shipping_transfer st
-on st.transfer_type=(regexp_split_to_array(s.shipping_transfer_description , e'\\:+'))[1]
+ON concat_ws(':', st.transfer_type, st.transfer_model) = s.shipping_transfer_description 
 LEFT JOIN public.shipping_country_rates scr 
 on scr.shipping_country=s.shipping_country
 LEFT JOIN public.shipping_agreement sa 
