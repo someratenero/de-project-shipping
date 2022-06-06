@@ -157,6 +157,6 @@ on st.id=si.shipping_country_id
 LEFT JOIN shipping_status as ss 
 on ss.shippingid = si.shippingid
 LEFT JOIN shipping_country_rates scr 
-on scr.id=si.shipping_country_id 
+on scr.id=si.transfer_type_id 
 LEFT JOIN shipping_agreement sa
 on sa.agreementid=si.agreementid;
